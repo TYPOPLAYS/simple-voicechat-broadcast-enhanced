@@ -25,15 +25,6 @@ This project is based on [henkelmax/voicechat-broadcast-plugin](https://github.c
 
 Your voice will be transmitted to every other online player with an active SVC connection, regardless of their current voicechat group.
 
-
-## Permissions
-
-| Permission | Description |
-|---|---|---|
-| `voicechat_broadcast.broadcast` | Allows a player to broadcast their voice |
-
-Permissions can also be managed using a permissions plugin such as LuckPerms.
-
 ## Credits
 
 - Original plugin by Max Henkel: [henkelmax/voicechat-broadcast-plugin](https://github.com/henkelmax/voicechat-broadcast-plugin)
