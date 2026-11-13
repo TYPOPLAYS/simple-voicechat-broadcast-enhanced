@@ -1,100 +1,123 @@
 package de.maxhenkel.voicechat_broadcast;
 
-import de.maxhenkel.voicechat.api.*;
+import de.maxhenkel.voicechat.api.Group;
+import de.maxhenkel.voicechat.api.VoicechatApi;
+import de.maxhenkel.voicechat.api.VoicechatConnection;
+import de.maxhenkel.voicechat.api.VoicechatPlugin;
+import de.maxhenkel.voicechat.api.VoicechatServerApi;
 import de.maxhenkel.voicechat.api.events.EventRegistration;
 import de.maxhenkel.voicechat.api.events.MicrophonePacketEvent;
-import org.bukkit.Bukkit;
-import org.bukkit.entity.Player;
+import de.maxhenkel.voicechat.api.packets.StaticSoundPacket;
 import org.bukkit.permissions.Permission;
 import org.bukkit.permissions.PermissionDefault;
 
-public class BroadcastVoicechatPlugin implements VoicechatPlugin {
+import java.nio.charset.StandardCharsets;
+import java.util.Set;
+import java.util.UUID;
 
-    /**
-     * Only OPs have the broadcast permission by default
-     */
-    public static Permission BROADCAST_PERMISSION = new Permission("voicechat_broadcast.broadcast", PermissionDefault.OP);
+public final class BroadcastVoicechatPlugin implements VoicechatPlugin {
 
-    /**
-     * @return the unique ID for this voice chat plugin
-     */
+    public static final Permission BROADCAST_PERMISSION = new Permission(
+            "voicechat_broadcast.broadcast",
+            PermissionDefault.OP
+    );
+
+    private static final String BROADCAST_GROUP = "broadcast";
+    private static final String CHANNEL_PREFIX = "voicechat_broadcast:";
+
+    private volatile PlayerSnapshot snapshot = new PlayerSnapshot(Set.of(), Set.of());
+    private volatile boolean active = true;
+
     @Override
     public String getPluginId() {
         return VoicechatBroadcast.PLUGIN_ID;
     }
 
-    /**
-     * Called when the voice chat initializes the plugin.
-     *
-     * @param api the voice chat API
-     */
     @Override
     public void initialize(VoicechatApi api) {
-
     }
 
-    /**
-     * Called once by the voice chat to register all events.
-     *
-     * @param registration the event registration
-     */
     @Override
     public void registerEvents(EventRegistration registration) {
-        registration.registerEvent(MicrophonePacketEvent.class, this::onMicrophone);
+        registration.registerEvent(
+                MicrophonePacketEvent.class,
+                this::onMicrophone
+        );
     }
 
-    /**
-     * This method is called whenever a player sends audio to the server via the voice chat.
-     *
-     * @param event the microphone packet event
-     */
+    public void updateSnapshot(Set<UUID> broadcasters, Set<UUID> recipients) {
+        snapshot = new PlayerSnapshot(
+                Set.copyOf(broadcasters),
+                Set.copyOf(recipients)
+        );
+    }
+
+    public void deactivate() {
+        active = false;
+        snapshot = new PlayerSnapshot(Set.of(), Set.of());
+    }
+
     private void onMicrophone(MicrophonePacketEvent event) {
-        // The connection might be null if the event is caused by other means
+        if (!active) {
+            return;
+        }
+
         if (event.getSenderConnection() == null) {
             return;
         }
-        // Cast the generic player object of the voice chat API to an actual bukkit player
-        // This object should always be a bukkit player object on bukkit based servers
-        if (!(event.getSenderConnection().getPlayer().getPlayer() instanceof Player player)) {
-            return;
-        }
 
-        // Check if the player has the broadcast permission
-        if (!player.hasPermission(BROADCAST_PERMISSION)) {
+        UUID senderId = event.getSenderConnection().getPlayer().getUuid();
+        PlayerSnapshot currentSnapshot = snapshot;
+
+        if (!currentSnapshot.broadcasters().contains(senderId)) {
             return;
         }
 
         Group group = event.getSenderConnection().getGroup();
 
-        // Check if the player sending the audio is actually in a group
-        if (group == null) {
+        if (group == null || !BROADCAST_GROUP.equalsIgnoreCase(group.getName().strip())) {
             return;
         }
 
-        // Only broadcast the voice when the group name is "broadcast"
-        if (!group.getName().strip().equalsIgnoreCase("broadcast")) {
+        UUID channelId = UUID.nameUUIDFromBytes(
+                (CHANNEL_PREFIX + senderId).getBytes(StandardCharsets.UTF_8)
+        );
+
+        StaticSoundPacket packet;
+
+        try {
+            packet = event.getPacket()
+                    .staticSoundPacketBuilder()
+                    .channelId(channelId)
+                    .build();
+        } catch (IllegalStateException exception) {
             return;
         }
 
-        // Cancel the actual microphone packet event that people in that group or close by don't hear the broadcaster twice
-        event.cancel();
+        if (!event.cancel()) {
+            return;
+        }
 
         VoicechatServerApi api = event.getVoicechat();
 
-        // Iterating over every player on the server
-        for (Player onlinePlayer : Bukkit.getServer().getOnlinePlayers()) {
-            // Don't send the audio to the player that is broadcasting
-            if (onlinePlayer.getUniqueId().equals(player.getUniqueId())) {
+        for (UUID recipientId : currentSnapshot.recipients()) {
+            if (recipientId.equals(senderId)) {
                 continue;
             }
-            VoicechatConnection connection = api.getConnectionOf(onlinePlayer.getUniqueId());
-            // Check if the player is actually connected to the voice chat
+
+            VoicechatConnection connection = api.getConnectionOf(recipientId);
+
             if (connection == null) {
                 continue;
             }
-            // Send a static audio packet of the microphone data to the connection of each player
-            api.sendStaticSoundPacketTo(connection, event.getPacket().toStaticSoundPacket());
+
+            api.sendStaticSoundPacketTo(connection, packet);
         }
     }
 
+    private record PlayerSnapshot(
+            Set<UUID> broadcasters,
+            Set<UUID> recipients
+    ) {
+    }
 }

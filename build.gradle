@@ -2,19 +2,27 @@ plugins {
     id 'java'
 }
 
-sourceCompatibility = JavaVersion.toVersion(java_version)
-targetCompatibility = JavaVersion.toVersion(java_version)
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(java_version as int)
+    }
+}
 
-archivesBaseName = archives_base_name
+base {
+    archivesName = archives_base_name
+}
+
 version = plugin_version
 group = maven_group
 
 processResources {
     filteringCharset = 'UTF-8'
 
-    filesMatching("plugin.yml") {
-        expand "version": plugin_version,
-                "bukkit_api_version": bukkit_api_version
+    filesMatching('plugin.yml') {
+        expand(
+            version: plugin_version,
+            bukkit_api_version: bukkit_api_version
+        )
     }
 }
 
@@ -28,14 +36,18 @@ repositories {
     mavenCentral()
 
     maven {
-        name = "henkelmax.public"
-        url = 'https://maven.maxhenkel.de/repository/public'
+        name = 'henkelmax'
+        url = uri('https://maven.maxhenkel.de/repository/public')
     }
 
     maven {
-        name = "papermc"
-        url = uri("https://repo.papermc.io/repository/maven-public/")
+        name = 'papermc'
+        url = uri('https://repo.papermc.io/repository/maven-public/')
     }
 
     mavenLocal()
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.compilerArgs += ['-Xlint:deprecation']
 }
